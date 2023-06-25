@@ -7,64 +7,70 @@ import sqlite3
 
 URL = "http://programmer100.pythonanywhere.com/tours/"
 
-connection = sqlite3.connect("data.db")
+
+class Event:
+    def scrape(self, url):
+        """Scrape the page source from the URL"""
+        response = requests.get(url)
+        source = response.text
+        return source
+
+    def extract(self, source):
+        extractor = selectorlib.Extractor.from_yaml_file("extract.yaml")
+        value = extractor.extract(source)["tours"]
+        return value
 
 
-def scrape(url):
-    """Scrape the page source from the URL"""
-    response = requests.get(url)
-    source = response.text
-    return source
+class Email:
+    def __init__(self):
+        self.host = "smtp.gmail.com"
+        self.port = 465
+        self.username = os.getenv("EMAILAPPUSERNAME")
+        self.password = os.getenv("EMAILNEWSPASSWORD")
+
+    def send(self, message):
+
+        receiver = self.username
+        context = ssl.create_default_context()
+
+        with smtplib.SMTP_SSL(self.host, self.port, context=context) as server:
+            server.login(self.username, self.password)
+            server.sendmail(self.username, receiver, message)
 
 
-def extract(source):
-    extractor = selectorlib.Extractor.from_yaml_file("extract.yaml")
-    value = extractor.extract(source)["tours"]
-    return value
+class Database:
+    def __init__(self, database_path):
+        self.connection = sqlite3.connect(database_path)
 
+    def store(self, extracted_local):
+        row_local = extracted_local.split(",")
+        row_local = [item.strip() for item in row_local]
+        cursor = self.connection.cursor()
+        cursor.execute("INSERT INTO events VALUES(?,?,?)", row_local)
+        self.connection.commit()
 
-def send_email(message):
-    host = "smtp.gmail.com"
-    port = 465
+    def read(self, extracted_local):
+        row_local = extracted_local.split(",")
+        row_local = [item.strip() for item in row_local]
+        band, city, date = row_local
+        cursor = self.connection.cursor()
 
-    username = os.getenv("EMAILAPPUSERNAME")
-    password = os.getenv("EMAILNEWSPASSWORD")
-
-    receiver = username
-    context = ssl.create_default_context()
-
-    with smtplib.SMTP_SSL(host, port, context=context) as server:
-        server.login(username, password)
-        server.sendmail(username, receiver, message)
-
-
-def store(extracted_local):
-    row_local = extracted_local.split(",")
-    row_local = [item.strip() for item in row_local]
-    cursor = connection.cursor()
-    cursor.execute("INSERT INTO events VALUES(?,?,?)", row_local)
-    connection.commit()
-
-
-def read(extracted_local):
-    row_local = extracted_local.split(",")
-    row_local = [item.strip() for item in row_local]
-    band, city, date = row_local
-    cursor = connection.cursor()
-
-    cursor.execute("SELECT * FROM events WHERE band=? AND city=? AND date=?", (band, city, date))
-    rows = cursor.fetchall()
-    print(rows)
-    return rows
+        cursor.execute("SELECT * FROM events WHERE band=? AND city=? AND date=?", (band, city, date))
+        rows = cursor.fetchall()
+        print(rows)
+        return rows
 
 
 if __name__ == "__main__":
-    scraped = scrape(URL)
-    extracted = extract(scraped)
+    event = Event()
+    scraped = event.scrape(URL)
+    extracted = event.extract(scraped)
     print(extracted)
 
     if extracted != "No upcoming tours":
-        row = read(extracted)
+        database = Database(database_path="data.db")
+        row = database.read(extracted)
         if not row:
-            store(extracted)
-            send_email(message="Hey, new event was found!")
+            database.store(extracted)
+            email = Email()
+            email.send(message="Hey, new event was found!")
